@@ -6,20 +6,21 @@ import makeWASocket, {
 import qrcode from 'qrcode-terminal';
 import P from 'pino';
 import http from 'http';
+import { menuHandler, sendUchihaMenu } from './menu.js';
+import { submenuHandler } from './submenu.js';
+import { handleCommand } from './src/commands/index.js';
+import { db } from './src/config/database.js';
 
 // Função principal que inicializa e conecta o bot
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
 
-    // Tratamento robusto do retorno de fetchLatestBaileysVersion()
     const latest = await fetchLatestBaileysVersion();
-    // latest pode ser um array [x,y,z] ou um objeto { version: [x,y,z], ... }
     const version = Array.isArray(latest) ? latest : (latest?.version ?? latest);
-    console.log(`Usando a versão do WhatsApp Web: ${Array.isArray(version) ? version.join('.') : JSON.stringify(version)}`);
+    console.log(`🤖 Usando a versão do WhatsApp Web: ${Array.isArray(version) ? version.join('.') : JSON.stringify(version)}`);
 
     const sock = makeWASocket({
         auth: state,
-        // Defina printQRInTerminal: true temporariamente se quiser ver o QR diretamente
         printQRInTerminal: false,
         logger: P({ level: 'silent' }),
         version: Array.isArray(version) ? version : undefined,
@@ -29,21 +30,19 @@ async function connectToWhatsApp() {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-            console.log('--- Escaneie o QR Code abaixo ---');
+            console.log('\n--- 📱 Escaneie o QR Code abaixo ---');
             qrcode.generate(qr, { small: true });
-            console.log('---------------------------------');
-            console.log('Se estiver rodando neste mesmo celular, você precisa outro aparelho para escanear o QR.');
+            console.log('---------------------------------\n');
         }
 
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log('Conexão fechada. Tentando reconectar:', shouldReconnect);
+            console.log('❌ Conexão fechada. Tentando reconectar:', shouldReconnect);
             if (shouldReconnect) {
-                // esperar um pouco antes de reconectar para evitar loop rápido
                 setTimeout(() => connectToWhatsApp(), 5000);
             }
         } else if (connection === 'open') {
-            console.log('✅ Conectado com sucesso ao WhatsApp Web!');
+            console.log('✅ Conectado com sucesso ao WhatsApp Web!\n');
         }
     });
 
@@ -57,17 +56,37 @@ async function connectToWhatsApp() {
 
         const messageText = m.message?.conversation || m.message?.extendedTextMessage?.text || '';
         const remoteJid = m.key.remoteJid;
+        const userId = m.key.participant || remoteJid;
 
+        // Garantir que o usuário existe no banco de dados
+        db.getOrCreateUser(userId);
+
+        console.log(`📨 [${new Date().toLocaleTimeString('pt-BR')}] Mensagem: ${messageText}`);
+
+        // Tratamento de comandos
+        const commandHandled = await handleCommand(sock, m);
+        if (commandHandled) return;
+
+        // Tratamento de mensagens simples
         switch (messageText.toLowerCase().trim()) {
             case 'oi':
-                await sock.sendMessage(remoteJid, { text: 'Olá! Estou online e processando comandos!' });
-                break;
-            case '!ping':
-                await sock.sendMessage(remoteJid, { text: 'Pong! 🏓' });
+            case 'olá':
+            case 'e aí':
+            case 'oi bot':
+                await sock.sendMessage(remoteJid, { text: '👁️ Olá! Bem-vindo ao poder Uchiha!\n\nDigite !ajuda para ver todos os comandos ou !menu para o menu interativo.' });
                 break;
             case '!menu':
-                const menuMessage = "MENU-BOT\nEscolha uma categoria abaixo:\n\n!ping - Testar conexão";
-                await sock.sendMessage(remoteJid, { text: menuMessage });
+                await menuHandler(sock, m);
+                break;
+            case '!ajuda':
+                await sendUchihaMenu(sock, remoteJid);
+                break;
+            case 'economia':
+            case 'xp':
+            case 'diversao':
+            case 'info':
+            case 'utilidades':
+                await submenuHandler(sock, m, messageText.toLowerCase().trim());
                 break;
         }
     });
@@ -75,14 +94,14 @@ async function connectToWhatsApp() {
 
 // Inicia a conexão do bot
 connectToWhatsApp().catch(err => {
-    console.error('Erro ao conectar ao WhatsApp:', err);
+    console.error('❌ Erro ao conectar ao WhatsApp:', err);
 });
 
-// Pequeno servidor HTTP para ficar escutando a porta (útil no Render)
+// Servidor HTTP para ficar escutando a porta (útil no Render)
 const port = process.env.PORT || 3000;
 http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Uchiha Bot está rodando.\n');
+    res.end('✅ Uchiha Bot está rodando.\n');
 }).listen(port, () => {
-    console.log(`Servidor de saúde rodando na porta ${port}`);
+    console.log(`🌐 Servidor HTTP rodando na porta ${port}\n`);
 });
