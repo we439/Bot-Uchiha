@@ -10,7 +10,7 @@
     "preinstall": "node ./engine-requirements.js",
     "start": "node index.js",
     "lint": "eslint .",
-    "test": "echo No tests specified && exit 0"
+    "test": "echo No tests specified && exit 0",
     "build": "echo No build step required"
   },
   "dependencies": {
